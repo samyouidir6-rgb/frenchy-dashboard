@@ -46,25 +46,47 @@ async function getAuthenticatedRestaurant(
 
   const {
     data: restaurantUser,
-    error: restaurantError,
+    error: restaurantUserError,
   } = await supabase
     .from("restaurant_users")
-    .select("restaurant")
+    .select("restaurant_id")
     .eq("user_id", user.id)
     .single();
 
   if (
-    restaurantError ||
-    !restaurantUser?.restaurant
+    restaurantUserError ||
+    !restaurantUser?.restaurant_id
   ) {
     throw new Error(
       "Aucun restaurant associé à ce compte"
     );
   }
 
+  const {
+    data: restaurant,
+    error: restaurantError,
+  } = await supabase
+    .from("restaurants")
+    .select(`
+      id,
+      name,
+      slug,
+      active
+    `)
+    .eq("id", restaurantUser.restaurant_id)
+    .single();
+
+  if (restaurantError || !restaurant) {
+    throw new Error("Restaurant introuvable");
+  }
+
+  if (!restaurant.active) {
+    throw new Error("Restaurant désactivé");
+  }
+
   return {
     supabase,
-    restaurant: restaurantUser.restaurant,
+    restaurant,
   };
 }
 
@@ -84,7 +106,7 @@ export async function GET(req: NextRequest) {
         price,
         available
       `)
-      .eq("restaurant", restaurant)
+      .eq("restaurant_id", restaurant.id)
       .order("category", { ascending: true })
       .order("name", { ascending: true });
 
@@ -107,6 +129,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         success: true,
+        restaurant: {
+          id: restaurant.id,
+          name: restaurant.name,
+          slug: restaurant.slug,
+        },
         products: data || [],
       },
       {
@@ -177,7 +204,7 @@ export async function PATCH(req: NextRequest) {
         available,
       })
       .eq("id", productId)
-      .eq("restaurant", restaurant)
+      .eq("restaurant_id", restaurant.id)
       .select(`
         id,
         name,

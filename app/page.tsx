@@ -4,6 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 
+type Restaurant = {
+  id: number;
+  name: string;
+  slug: string;
+  phone?: string | null;
+  address?: string | null;
+  default_wait_minutes?: string | null;
+  order_prefix?: string | null;
+};
+
 type Order = {
   id: number;
   created_at: string;
@@ -95,6 +105,9 @@ export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
+  const [restaurant, setRestaurant] =
+    useState<Restaurant | null>(null);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
@@ -108,7 +121,8 @@ export default function Home() {
   const [products, setProducts] = useState<Product[]>([]);
 
   const [loadingOrders, setLoadingOrders] = useState(true);
-  const [loadingProducts, setLoadingProducts] = useState(true);
+  const [loadingProducts, setLoadingProducts] =
+    useState(true);
 
   const [ordersError, setOrdersError] = useState("");
   const [productsError, setProductsError] = useState("");
@@ -163,6 +177,11 @@ export default function Home() {
       }
 
       setOrders(result.orders || []);
+
+      if (result.restaurant) {
+        setRestaurant(result.restaurant);
+      }
+
       setOrdersError("");
       setLastRefresh(new Date());
     } catch (err) {
@@ -205,6 +224,14 @@ export default function Home() {
       }
 
       setProducts(result.products || []);
+
+      if (result.restaurant) {
+        setRestaurant((currentRestaurant) => ({
+          ...currentRestaurant,
+          ...result.restaurant,
+        }));
+      }
+
       setProductsError("");
     } catch (err) {
       setProductsError(
@@ -364,6 +391,7 @@ export default function Home() {
   async function handleLogout() {
     await supabase.auth.signOut();
 
+    setRestaurant(null);
     setOrders([]);
     setProducts([]);
     setLastRefresh(null);
@@ -474,6 +502,9 @@ export default function Home() {
     });
   }, [products, search, selectedCategory]);
 
+  const orderPrefix =
+    restaurant?.order_prefix?.trim() || "CMD";
+
   if (authLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
@@ -490,11 +521,11 @@ export default function Home() {
         <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow">
           <div className="mb-8 text-center">
             <h1 className="text-3xl font-bold">
-              Frenchy Test
+              Tableau de bord
             </h1>
 
             <p className="mt-2 text-gray-500">
-              Connexion au tableau de bord
+              Connexion restaurateur
             </p>
           </div>
 
@@ -565,7 +596,7 @@ export default function Home() {
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold">
-              Frenchy Test
+              {restaurant?.name || "Restaurant"}
             </h1>
 
             <p className="mt-2 text-gray-600">
@@ -732,7 +763,7 @@ export default function Home() {
                       <div className="mb-4 flex items-start justify-between gap-4">
                         <div>
                           <h3 className="text-xl font-bold">
-                            FT-
+                            {orderPrefix}-
                             {String(order.id).padStart(
                               4,
                               "0"

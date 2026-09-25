@@ -46,26 +46,52 @@ async function getAuthenticatedRestaurant(
 
   const {
     data: restaurantUser,
-    error: restaurantError,
+    error: restaurantUserError,
   } = await supabase
     .from("restaurant_users")
-    .select("restaurant")
+    .select("restaurant_id")
     .eq("user_id", user.id)
     .single();
 
   if (
-    restaurantError ||
-    !restaurantUser?.restaurant
+    restaurantUserError ||
+    !restaurantUser?.restaurant_id
   ) {
     throw new Error(
       "Aucun restaurant associé à ce compte"
     );
   }
 
+  const {
+    data: restaurant,
+    error: restaurantError,
+  } = await supabase
+    .from("restaurants")
+    .select(`
+      id,
+      name,
+      slug,
+      active,
+      phone,
+      address,
+      default_wait_minutes,
+      order_prefix
+    `)
+    .eq("id", restaurantUser.restaurant_id)
+    .single();
+
+  if (restaurantError || !restaurant) {
+    throw new Error("Restaurant introuvable");
+  }
+
+  if (!restaurant.active) {
+    throw new Error("Restaurant désactivé");
+  }
+
   return {
     supabase,
-    restaurant: restaurantUser.restaurant,
     user,
+    restaurant,
   };
 }
 
@@ -79,7 +105,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabase
       .from("orders")
       .select("*")
-      .eq("restaurant", restaurant)
+      .eq("restaurant_id", restaurant.id)
       .order("created_at", {
         ascending: false,
       });
@@ -103,6 +129,19 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         success: true,
+
+        restaurant: {
+          id: restaurant.id,
+          name: restaurant.name,
+          slug: restaurant.slug,
+          phone: restaurant.phone,
+          address: restaurant.address,
+          default_wait_minutes:
+            restaurant.default_wait_minutes,
+          order_prefix:
+            restaurant.order_prefix,
+        },
+
         orders: data || [],
       },
       {
