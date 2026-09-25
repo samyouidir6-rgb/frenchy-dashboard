@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
 
 type Order = {
   id: number;
@@ -90,6 +92,14 @@ function getStatusClass(status: string) {
 }
 
 export default function Home() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+
   const [tab, setTab] = useState<Tab>("orders");
   const [orderView, setOrderView] =
     useState<OrderView>("active");
@@ -116,13 +126,30 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] =
     useState("Toutes");
 
+  async function getAccessToken() {
+    const {
+      data: { session: currentSession },
+    } = await supabase.auth.getSession();
+
+    return currentSession?.access_token || null;
+  }
+
   async function loadOrders() {
     try {
+      const accessToken = await getAccessToken();
+
+      if (!accessToken) {
+        return;
+      }
+
       const response = await fetch(
         `/api/orders?t=${Date.now()}`,
         {
           method: "GET",
           cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
         }
       );
 
@@ -151,11 +178,20 @@ export default function Home() {
 
   async function loadProducts() {
     try {
+      const accessToken = await getAccessToken();
+
+      if (!accessToken) {
+        return;
+      }
+
       const response = await fetch(
         `/api/products?t=${Date.now()}`,
         {
           method: "GET",
           cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
         }
       );
 
@@ -187,10 +223,17 @@ export default function Home() {
     try {
       setUpdatingProductId(product.id);
 
+      const accessToken = await getAccessToken();
+
+      if (!accessToken) {
+        throw new Error("Session expirée");
+      }
+
       const response = await fetch("/api/products", {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({
           id: product.id,
@@ -234,12 +277,19 @@ export default function Home() {
     try {
       setUpdatingOrderId(orderId);
 
+      const accessToken = await getAccessToken();
+
+      if (!accessToken) {
+        throw new Error("Session expirée");
+      }
+
       const response = await fetch(
         "/api/orders/status",
         {
           method: "PATCH",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
             id: orderId,
@@ -280,7 +330,79 @@ export default function Home() {
     }
   }
 
+  async function handleLogin(
+    event: React.FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    try {
+      setLoginLoading(true);
+      setLoginError("");
+
+      const { error } =
+        await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+      if (error) {
+        throw error;
+      }
+
+      setPassword("");
+    } catch (err) {
+      setLoginError(
+        err instanceof Error
+          ? err.message
+          : "Connexion impossible"
+      );
+    } finally {
+      setLoginLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+
+    setOrders([]);
+    setProducts([]);
+    setLastRefresh(null);
+  }
+
   useEffect(() => {
+    async function loadSession() {
+      const {
+        data: { session: currentSession },
+      } = await supabase.auth.getSession();
+
+      setSession(currentSession);
+      setAuthLoading(false);
+    }
+
+    loadSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (_event, currentSession) => {
+        setSession(currentSession);
+        setAuthLoading(false);
+      }
+    );
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+
+    setLoadingOrders(true);
+    setLoadingProducts(true);
+
     loadOrders();
     loadProducts();
 
@@ -291,7 +413,7 @@ export default function Home() {
     return () => {
       clearInterval(interval);
     };
-  }, []);
+  }, [session]);
 
   const activeOrders = useMemo(() => {
     return orders.filter((order) =>
@@ -352,17 +474,115 @@ export default function Home() {
     });
   }, [products, search, selectedCategory]);
 
+  if (authLoading) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
+        <div className="rounded-xl bg-white p-8 shadow">
+          Chargement...
+        </div>
+      </main>
+    );
+  }
+
+  if (!session) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
+        <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow">
+          <div className="mb-8 text-center">
+            <h1 className="text-3xl font-bold">
+              Frenchy Test
+            </h1>
+
+            <p className="mt-2 text-gray-500">
+              Connexion au tableau de bord
+            </p>
+          </div>
+
+          <form
+            onSubmit={handleLogin}
+            className="space-y-5"
+          >
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                Adresse email
+              </label>
+
+              <input
+                type="email"
+                value={email}
+                onChange={(event) =>
+                  setEmail(event.target.value)
+                }
+                required
+                autoComplete="email"
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-black"
+                placeholder="restaurant@email.com"
+              />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium">
+                Mot de passe
+              </label>
+
+              <input
+                type="password"
+                value={password}
+                onChange={(event) =>
+                  setPassword(event.target.value)
+                }
+                required
+                autoComplete="current-password"
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 outline-none focus:border-black"
+                placeholder="Votre mot de passe"
+              />
+            </div>
+
+            {loginError && (
+              <div className="rounded-xl bg-red-50 p-4 text-sm text-red-700">
+                {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="w-full rounded-xl bg-black px-4 py-3 font-semibold text-white transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loginLoading
+                ? "Connexion..."
+                : "Se connecter"}
+            </button>
+          </form>
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-gray-100 p-6">
       <div className="mx-auto max-w-6xl">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold">
-            Frenchy Test
-          </h1>
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">
+              Frenchy Test
+            </h1>
 
-          <p className="mt-2 text-gray-600">
-            Tableau de bord restaurant
-          </p>
+            <p className="mt-2 text-gray-600">
+              Tableau de bord restaurant
+            </p>
+
+            <p className="mt-1 text-xs text-gray-400">
+              {session.user.email}
+            </p>
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+          >
+            Se déconnecter
+          </button>
         </div>
 
         <div className="mb-6 flex gap-2 rounded-xl bg-white p-2 shadow-sm">

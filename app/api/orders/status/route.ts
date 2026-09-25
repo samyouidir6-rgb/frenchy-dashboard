@@ -15,6 +15,56 @@ function getSupabaseAdmin() {
   );
 }
 
+async function getAuthenticatedRestaurant(
+  req: NextRequest
+) {
+  const authorization =
+    req.headers.get("authorization");
+
+  if (
+    !authorization ||
+    !authorization.startsWith("Bearer ")
+  ) {
+    throw new Error("Non autorisé");
+  }
+
+  const accessToken = authorization.substring(7);
+
+  const supabase = getSupabaseAdmin();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser(accessToken);
+
+  if (userError || !user) {
+    throw new Error("Session invalide");
+  }
+
+  const {
+    data: restaurantUser,
+    error: restaurantError,
+  } = await supabase
+    .from("restaurant_users")
+    .select("restaurant")
+    .eq("user_id", user.id)
+    .single();
+
+  if (
+    restaurantError ||
+    !restaurantUser?.restaurant
+  ) {
+    throw new Error(
+      "Aucun restaurant associé à ce compte"
+    );
+  }
+
+  return {
+    supabase,
+    restaurant: restaurantUser.restaurant,
+  };
+}
+
 const allowedStatuses = [
   "confirmed",
   "preparing",
@@ -25,6 +75,11 @@ const allowedStatuses = [
 
 export async function PATCH(req: NextRequest) {
   try {
+    const {
+      supabase,
+      restaurant,
+    } = await getAuthenticatedRestaurant(req);
+
     const body = await req.json();
 
     const orderId = Number(body.id);
@@ -53,15 +108,13 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    const supabase = getSupabaseAdmin();
-
     const { data, error } = await supabase
       .from("orders")
       .update({
         status,
       })
       .eq("id", orderId)
-      .eq("restaurant", "Frenchy Test")
+      .eq("restaurant", restaurant)
       .select("id, status")
       .single();
 
@@ -80,15 +133,23 @@ export async function PATCH(req: NextRequest) {
       order: data,
     });
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Erreur inconnue";
+
+    const unauthorized =
+      message === "Non autorisé" ||
+      message === "Session invalide";
+
     return NextResponse.json(
       {
         success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Erreur inconnue",
+        error: message,
       },
-      { status: 500 }
+      {
+        status: unauthorized ? 401 : 403,
+      }
     );
   }
 }

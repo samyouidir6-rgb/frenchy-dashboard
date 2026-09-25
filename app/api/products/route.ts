@@ -18,9 +18,62 @@ function getSupabaseAdmin() {
   );
 }
 
-export async function GET() {
+async function getAuthenticatedRestaurant(
+  req: NextRequest
+) {
+  const authorization =
+    req.headers.get("authorization");
+
+  if (
+    !authorization ||
+    !authorization.startsWith("Bearer ")
+  ) {
+    throw new Error("Non autorisé");
+  }
+
+  const accessToken = authorization.substring(7);
+
+  const supabase = getSupabaseAdmin();
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser(accessToken);
+
+  if (userError || !user) {
+    throw new Error("Session invalide");
+  }
+
+  const {
+    data: restaurantUser,
+    error: restaurantError,
+  } = await supabase
+    .from("restaurant_users")
+    .select("restaurant")
+    .eq("user_id", user.id)
+    .single();
+
+  if (
+    restaurantError ||
+    !restaurantUser?.restaurant
+  ) {
+    throw new Error(
+      "Aucun restaurant associé à ce compte"
+    );
+  }
+
+  return {
+    supabase,
+    restaurant: restaurantUser.restaurant,
+  };
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const supabase = getSupabaseAdmin();
+    const {
+      supabase,
+      restaurant,
+    } = await getAuthenticatedRestaurant(req);
 
     const { data, error } = await supabase
       .from("products")
@@ -31,7 +84,7 @@ export async function GET() {
         price,
         available
       `)
-      .eq("restaurant", "Frenchy Test")
+      .eq("restaurant", restaurant)
       .order("category", { ascending: true })
       .order("name", { ascending: true });
 
@@ -44,7 +97,8 @@ export async function GET() {
         {
           status: 500,
           headers: {
-            "Cache-Control": "no-store",
+            "Cache-Control":
+              "no-store, no-cache, must-revalidate",
           },
         }
       );
@@ -58,26 +112,40 @@ export async function GET() {
       {
         status: 200,
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control":
+            "no-store, no-cache, must-revalidate",
         },
       }
     );
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Erreur inconnue";
+
+    const unauthorized =
+      message === "Non autorisé" ||
+      message === "Session invalide";
+
     return NextResponse.json(
       {
         success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Erreur inconnue",
+        error: message,
       },
-      { status: 500 }
+      {
+        status: unauthorized ? 401 : 403,
+      }
     );
   }
 }
 
 export async function PATCH(req: NextRequest) {
   try {
+    const {
+      supabase,
+      restaurant,
+    } = await getAuthenticatedRestaurant(req);
+
     const body = await req.json();
 
     const productId = Number(body.id);
@@ -103,15 +171,13 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    const supabase = getSupabaseAdmin();
-
     const { data, error } = await supabase
       .from("products")
       .update({
         available,
       })
       .eq("id", productId)
-      .eq("restaurant", "Frenchy Test")
+      .eq("restaurant", restaurant)
       .select(`
         id,
         name,
@@ -136,15 +202,23 @@ export async function PATCH(req: NextRequest) {
       product: data,
     });
   } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Erreur inconnue";
+
+    const unauthorized =
+      message === "Non autorisé" ||
+      message === "Session invalide";
+
     return NextResponse.json(
       {
         success: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Erreur inconnue",
+        error: message,
       },
-      { status: 500 }
+      {
+        status: unauthorized ? 401 : 403,
+      }
     );
   }
 }
